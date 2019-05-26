@@ -23,11 +23,11 @@ def signGenMatrix(_n, _m):
 
 
 class array4SPS:
-    def __init__(self, _parameters, _realTheta, generator, *args):
+    def __init__(self, _parameters, _realTheta, _y): # generator, *args):
         self.parameters = _parameters.copy()
-        self.y = []
-        for i in range(len(self.parameters)):
-            self.y.append(np.dot(self.parameters[i], _realTheta) + generator(args))
+        self.y = _y.copy()
+        #for i in range(len(self.parameters)):
+        #   self.y.append(np.dot(self.parameters[i], _realTheta))# + generator(args))
         # self.dim = (_parameters[0].shape if _dim is None else _dim)
         self.dim = _parameters[0].shape[0]
         print("Parameters dimension =", self.dim)
@@ -47,7 +47,7 @@ class SPSmodule:
         self.dim = _array4me.dim
         #TODO: test this one!
         self.n = _array4me.parameters.size if _n is None else _n
-        self.oneNth = 1/self.n
+        self.oneNth = 1.0/self.n
         #TODO: test this one!
         self.A = np.transpose(np.append([np.ones(self.n)], signGenMatrix(self.m, self.n), axis = 0))
         self.Rn = np.zeros([self.dim, self.dim])
@@ -62,7 +62,7 @@ class SPSmodule:
         self.log = []
 
     def generateA(self):
-        self.A = np.transpose(np.append([np.ones(self.n)], signGenMatrix(self.m, self.n), axis = 0))
+        self.A = np.transpose(np.append([np.ones(self.n)], signGenMatrix(self.m, self.n), axis=0))
         return
 
     def generateAfrom1(self):
@@ -84,13 +84,8 @@ class SPSmodule:
             # but we need the 2nd matrix
             return
 
-    def refreshParameters(self, _parameters):
-        self.parameters = _parameters.copy()
-        self.countRn()
-        return
-
     def countG(self, t, theta):
-        self.g[t] = np.transpose(self.parameters[self.begin + t])*(self.y[self.begin + t] - self.parameters[self.begin + t]*np.transpose(theta))
+        self.g[t] = np.transpose(self.parameters[self.begin + t])*(self.y[self.begin + t] - np.dot(self.parameters[self.begin + t], np.transpose(theta)))
         return
 
     def countAllGs(self, theta):
@@ -100,15 +95,14 @@ class SPSmodule:
 
     def countH(self, i, theta):
         SPSum = np.zeros([self.dim])
-        for t in range(self.begin, self.begin + self.n):
-            SPSum += self.A[t][i]*self.g[t]
+        for t in range(self.n):
+            SPSum += self.A[t][i] * self.g[t]
         return SPSum
-
-    #TODO: not needed in isThetaInRegion()
+    '''#TODO: not needed in isThetaInRegion()
     def countS(self, i, theta):
         #TODO: precount g_t(theta) (count once and then use saved results)
         return (1/self.n)*(self.Rn_inv_root)*(self.countH(i, theta))
-
+    '''
     def isThetaInRegion(self, theta):
         counterS = 0
         counterH = 0
@@ -150,8 +144,9 @@ class SPSmodule:
         # DOES NOT NEED RECOUNT OF A, BEGIN
         self.generateAfrom1()
         self.begin = self.begin + 1
+        
         nplus1 = self.begin + self.n
-        gnplus1 = np.transpose(self.parameters[nplus1])*(self.y[nplus1] - self.parameters[nplus1]*np.transpose(theta))
+        gnplus1 = np.transpose(self.parameters[nplus1])*(self.y[nplus1] - np.dot(self.parameters[nplus1], np.transpose(theta)))
         deltaG = gnplus1 - self.g[0]
         self.g = np.delete(np.append(self.g, [gnplus1], axis=0), 0, 0)
         for i in range(self.m):
