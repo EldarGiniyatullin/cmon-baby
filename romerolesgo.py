@@ -49,7 +49,7 @@ class SPSmodule:
         self.n = _array4me.parameters.size if _n is None else _n
         self.oneNth = 1.0/self.n
         #TODO: test this one!
-        self.A = np.transpose(np.append([np.ones(self.n)], signGenMatrix(self.m, self.n), axis = 0))
+        self.A = np.transpose(np.append([np.ones(self.n)], signGenMatrix(self.m-1, self.n), axis = 0))
         self.Rn = np.zeros([self.dim, self.dim])
         self.Rn_root = np.zeros([self.dim, self.dim])
         self.Rn_inv_root = np.zeros([self.dim, self.dim])
@@ -80,12 +80,26 @@ class SPSmodule:
         except ln.ValueError:
             print("Rn is not a matrix!")
         else:
-            # cause of cholesky returns L*L.H,
-            # but we need the 2nd matrix
+            return
+
+    def countR(self, _params):
+        self.Rn = np.zeros([self.dim, self.dim])
+        for i in range(self.begin, self.begin + self.n):
+            self.Rn += np.outer(_params[i], _params[i])
+        self.Rn_root = ln.cholesky(self.Rn)
+        try:
+            self.Rn_inv_root = ln.inv(self.Rn_root)
+        except ln.LinAlgError:
+            print("Rn is not invertible")
+        except ln.ValueError:
+            print("Rn is not a matrix!")
+        else:
             return
 
     def countG(self, t, theta):
-        self.g[t] = np.transpose(self.parameters[self.begin + t])*(self.y[self.begin + t] - np.dot(self.parameters[self.begin + t], np.transpose(theta)))
+        epsilon = self.y[self.begin + t] - np.inner(self.parameters[self.begin + t], theta)
+        self.g[t] = epsilon*self.parameters[self.begin + t]
+
         return
 
     def countAllGs(self, theta):
@@ -97,7 +111,7 @@ class SPSmodule:
         SPSum = np.zeros([self.dim])
         for t in range(self.n):
             SPSum += self.A[t][i] * self.g[t]
-        return SPSum
+        return SPSum.copy()
     '''#TODO: not needed in isThetaInRegion()
     def countS(self, i, theta):
         #TODO: precount g_t(theta) (count once and then use saved results)
@@ -105,56 +119,63 @@ class SPSmodule:
     '''
     def isThetaInRegion(self, theta):
         counterS = 0
-        counterH = 0
         equalsS = 0
-        equalsH = 0
+        #counterH = 0
+
+        #equalsH = 0
         self.countAllGs(theta)
         self.generateA()
         for i in range(self.m):
             self.H[i] = self.countH(i, theta)
-            self.S[i] = self.oneNth * np.matmul(self.Rn_inv_root, (np.transpose(self.H[i])))
-            self.Hnorm[i] = np.dot(self.H[i], self.H[i])
-            self.Snorm[i] = np.dot(self.S[i], self.S[i])
-            if (self.Hnorm[i] < self.Hnorm[0]):
-                counterH += 1
+            self.S[i] = self.oneNth * np.matmul(self.Rn_inv_root, self.H[i])
+
+            #self.Hnorm[i] = np.inner(self.H[i], self.H[i])
+
+            self.Snorm[i] = np.inner(self.S[i], self.S[i])
+
+            #if (self.Hnorm[i] < self.Hnorm[0]):
+            #    counterH += 1
+            #if (self.Hnorm[i] == self.Hnorm[0]):
+            #    equalsH += 1
+
             if (self.Snorm[i] < self.Snorm[0]):
                 counterS += 1
-            if (self.Hnorm[i] == self.Hnorm[0]):
-                equalsH += 1
             if (self.Snorm[i] == self.Snorm[0]):
                 equalsS += 1
-        return True if (counterS + (equalsS // 2)) < (self.m - self.q) else False
+        return True if counterS < (self.m - self.q) else False
 
     def isThetaInRegionH(self, theta):
         counterH = 0
         equalsH = 0
         for i in range(self.m):
             self.H[i] = self.countH(i, theta)
-            self.Hnorm[i] = np.dot(self.H[i], np.transpose(self.H[i]))
+            self.Hnorm[i] = np.inner(self.H[i], self.H[i])
             if (self.Hnorm[i] < self.Hnorm[0]):
                 counterH += 1
             if (self.Hnorm[i] == self.Hnorm[0]):
                 equalsH += 1
         return True if (counterH + (equalsH // 2)) < (self.m - self.q) else False
 
-    def isThetaInRegionHPrev1(self, theta):
-        counterH = 0
-        equalsH = 0
-
+    def isThetaInRegionIter(self, theta, steps=1):
+        counterS = 0
+        equalsS = 0
+        extendedG = np.append(np.copy(self.g), np.full((steps, self.dim), np.NINF), axis=0)
         # DOES NOT NEED RECOUNT OF A, BEGIN
-        self.generateAfrom1()
-        self.begin = self.begin + 1
-        
-        nplus1 = self.begin + self.n
-        gnplus1 = np.transpose(self.parameters[nplus1])*(self.y[nplus1] - np.dot(self.parameters[nplus1], np.transpose(theta)))
-        deltaG = gnplus1 - self.g[0]
-        self.g = np.delete(np.append(self.g, [gnplus1], axis=0), 0, 0)
-        for i in range(self.m):
-            self.H[i] = self.H[i] + deltaG
-            self.Hnorm[i] = self.Hnorm[i] + 2*self.A[self.n-1][i]*np.dot(self.H[0], deltaG) # + else!!
-            if (self.Hnorm[i] < self.Hnorm[0]):
-                counterH += 1
-            if (self.Hnorm[i] == self.Hnorm[0]):
-                equalsH += 1
-        return True if (counterH + (equalsH // 2)) < (self.m - self.q) else False
+        for i in range(steps):
+            self.begin = self.begin + 1
+            nplus1 = self.begin + self.n - 1
+            extendedG[nplus1] = self.parameters[nplus1]*(self.y[nplus1] - np.inner(self.parameters[nplus1], theta))
+            #REWRITE R_n
+            self.countR(extendedG)
+            deltaG = extendedG[nplus1] - extendedG[self.begin-1]
+            for i in range(self.m):
+                self.H[i] = self.H[i] + self.A[1][i]*deltaG
+                self.S[i] = self.oneNth * np.matmul(self.Rn_inv_root, self.H[i])
+                self.Snorm[i] = np.inner(self.S[i], self.S[i])
+                if (self.Snorm[i] < self.Snorm[0]):
+                    counterS += 1
+                if (self.Snorm[i] == self.Snorm[0]):
+                    equalsS += 1
+            self.generateAfrom1()
+        return True if counterS < (self.m - self.q) else False
 # def determiner of theta's p-region "in-being"??
